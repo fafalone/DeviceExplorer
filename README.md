@@ -4,7 +4,7 @@
 
 (I was planning on posting a beta sooner, standing by for resolution of tB bug)
 
-Beta candidate 1 (UNTESTED) - tbDevMan-Beta.twinproj
+Beta candidate 1 (UNTESTED) - tbDevMan-Beta.twinproj. Device enum working, device properties popup working, UI done, capability check added on select untested, enable/disable/remove/eject untested.
 
 Alpha candidate 1 (UNTESTED) - tbDevMan-Alpha.twinproj
 
