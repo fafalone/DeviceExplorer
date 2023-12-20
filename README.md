@@ -4,7 +4,9 @@
 
 (I was planning on posting a beta sooner, standing by for resolution of tB bug)
 
-Alpha candidate 1 (UNTESTED) - tbDevManAlpha.twinproj
+Beta candidate 1 (UNTESTED) - tbDevMan-Beta.twinproj
+
+Alpha candidate 1 (UNTESTED) - tbDevMan-Alpha.twinproj
 
 Pre-alpha 2 posted: Successfully adds all devices.
 
