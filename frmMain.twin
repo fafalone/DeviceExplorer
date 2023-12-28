@@ -1,0 +1,1261 @@
+[ Description ("tbDevMan Main Form") ]
+[ FormDesignerId ("9D5C3949-7539-4FCC-9D96-136E21889D63") ]
+[ PredeclaredId ]
+Class Form1
+
+'Note: All APIs come from WinDevLib.
+
+'Code is currently highly repetive and inefficient, will refine after everything works.
+
+Private hModule As LongPtr 'We'll point this at the compiled exe if we're running in the IDE and it exists.
+
+Private cxyIcon As Long, cxyIconBtn As Long
+Private m_ScaleX As Single, m_ScaleY As Single
+
+Private himlMain As LongPtr
+
+
+Private Type DMItem
+	bDevice As Boolean
+    bDisable As Boolean
+    bPresent As Boolean
+    AsscGUID As UUID
+    DispName As String
+    Desc As String
+    InstId As String
+    hItem As LongPtr
+    hItemPar As LongPtr
+    nIcon As Long
+    dvi As Long
+    DevCap As SetupDevCap
+    ProblemCode As Long
+    ProblemText As String
+End Type
+Private DMSet() As DMItem
+Private nItems As Long
+Private nDevices As Long
+
+Private arClasses() As UUID
+
+Private Const szHelpTitle = "Device Explorer"
+Private Const szHelpHeader = "Device Explorer"
+Private Const szHelpMessage = "This project is a basic, light weight, and portable device manager for the local computer: list devices, show their property pages, and enable, disable, " & _
+                              "remove, or eject them. Note that not all devices support all actions, and running as administrator is required in most cases." & vbcrLf & _
+                              "Project by Jon Johnson based on numerous C/C++ projects, and an " & _
+                              "<a href=""https://www.vbforums.com/showthread.php?859333-TABLED-EnumDisplayDevices-vs-SetupDiEnumDeviceInfo&p=5265171&viewfull=1#post5265171"">example of basic device enumeration</a>" & _
+                              " on VBForums.com by Elroy. " & vbcrlf & vbcrlf & _
+                              "For the readme, filing bug reports, original source, feature requests, and anything else, visit the project's GitHub repository:" & vbcrlf & _
+                              "<a href=""https://github.com/fafalone/DeviceExplorer"">https://github.com/fafalone/DeviceExplorer</a>"
+Private Const szHelpFooter = "Copyright ©2023 Jon Johnson. Licensed under the MIT license. See code or repository for more information."
+Private Const szHelpIconRes = "101"
+Private idxSelected As Long
+
+Private Const IDI_ICONUNK = "102"
+
+Private Const IDI_OVRWARN = "201"
+Private Const IDI_OVRINFO = "202"
+Private Const IDI_OVRDOWN = "203"
+
+Private Const IDI_DISABLE = "301"
+Private Const IDI_REMOVE = "302"
+Private Const IDI_UNINST = "303"
+Private Const IDI_EJECT = "304"
+Private Const IDI_UPDATE = "305"
+Private Const IDI_REFRESH = "306"
+Private Const IDI_PLAIN = "307"
+
+
+Private Sub OnInitialize() Handles Form.Initialize
+    'Attempt to load resources from last .exe
+   hModule = GetModuleHandleW()
+   Dim InIde As Boolean: Debug.Assert MakeTrue(InIde)
+   If InIde Then
+       If (App.LastBuildPath = "") Or (PathFileExists(App.LastBuildPath) = 0) Then
+           MsgBox "You must compile this app before running it in the IDE as it depends on resources.", vbCritical Or vbOKOnly, App.Title
+           End
+           'hModule = App.hInstance
+       Else
+           hModule = LoadLibraryEx(App.LastBuildPath, 0, LOAD_LIBRARY_AS_DATAFILE Or LOAD_LIBRARY_AS_IMAGE_RESOURCE)
+       End If
+   End If
+End Sub
+Private Function MakeTrue(ByRef x As Boolean) As Boolean
+    x = True: MakeTrue = True
+End Function
+
+Private Sub OnLoad() Handles Form.Load
+    Dim hDC As LongPtr
+    hDC = GetDC(0&)
+    m_ScaleX = GetDeviceCaps(hDC, LOGPIXELSX) / 96
+    m_ScaleY = GetDeviceCaps(hDC, LOGPIXELSY) / 96
+    Select Case m_ScaleX
+    	Case Is <= 1: cxyIcon = 24
+        Case Is <= 1.25: cxyIcon = 32
+        Case Is <= 1.5: cxyIcon = 48
+        Case Else: cxyIcon = 64
+    End Select
+    ReleaseDC 0&, hDC
+    Dim sNameBuf As String = Space$(MAX_COMPUTERNAME_LENGTH)
+    Dim nLen As Long = MAX_COMPUTERNAME_LENGTH
+    If GetComputerName(sNameBuf, nLen) Then
+    	sNameBuf = Left$(sNameBuf, nLen)
+        Label1.Caption = "Computer: " & sNameBuf
+    End If
+    Dim bWow64 As BOOL, bEl As Boolean
+    Dim sPrompt As String, sMsg As String
+    bEl = IsProcessElevated()
+    If bEl Then
+    	Dim btPrev As Byte
+        Dim status As NTSTATUS = RtlAdjustPrivilege(SE_LOAD_DRIVER_PRIVILEGE, 1, 0, btPrev)
+        If NT_SUCCESS(status) Then
+        	Debug.Print "Enabled Load driver privilege"
+        Else
+        	Debug.Print "Failed to enabled load driver privilege, 0x" & Hex$(status) & GetNtErrorString(status)
+        End If
+    Else
+    	sPrompt = "WARNING: Not running as administrator." & vbCrLf
+    End If
+    IsWow64Process(GetCurrentProcess(), bWow64)
+    If bWow64 Then
+    	sPrompt = sPrompt & "WARNING: Running as 32bit process on 64bit OS." & vbCrLf
+    End If
+    If sPrompt <> "" Then
+        #If DBG_NO_CHECKS = 0 Then
+        MsgBox sPrompt & vbCrLf & _
+            "You can view the device list and properties, but you must run the 64bit version of this app with elevation to " & _
+            "enable/disable/remove devices on 64bit Windows.", vbCritical Or vbOKOnly, App.Title
+        #Else
+        Debug.Print sPrompt
+        #End If
+    End If
+    himlMain = ImageList_Create(cxyIcon, cxyIcon, ILC_COLOR32 Or ILC_HIGHQUALITYSCALE Or ILC_MASK, 1, 1)
+    'Set up overlay icons like the warning icon for devices with problems. (Not sure where the 2nd is used yet)
+    Dim hOvr1 As LongPtr = LoadImage(hModule, ByVal StrPtr(IDI_OVRWARN), IMAGE_ICON, cxyIcon, cxyIcon, LR_DEFAULTCOLOR Or LR_SHARED)
+    Dim hOvr2 As LongPtr = LoadImage(hModule, ByVal StrPtr(IDI_OVRINFO), IMAGE_ICON, cxyIcon, cxyIcon, LR_DEFAULTCOLOR Or LR_SHARED)
+    Dim hOvr3 As LongPtr = LoadImage(hModule, ByVal StrPtr(IDI_OVRDOWN), IMAGE_ICON, cxyIcon, cxyIcon, LR_DEFAULTCOLOR Or LR_SHARED)
+    Dim o1 As Long = ImageList_AddIcon(himlMain, hOvr1)
+    Dim o2 As Long = ImageList_AddIcon(himlMain, hOvr2)
+    Dim o3 As Long = ImageList_AddIcon(himlMain, hOvr3)
+    ImageList_SetOverlayImage(himlMain, o1, 1)
+    ImageList_SetOverlayImage(himlMain, o2, 2)
+    ImageList_SetOverlayImage(himlMain, o3, 3)
+    DestroyIcon hOvr1
+    DestroyIcon hOvr2
+    DestroyIcon hOvr3
+    SendMessage TreeView1.hWnd, TVM_SETIMAGELIST, 0, ByVal himlMain
+    SetWindowTheme TreeView1.hWnd, StrPtr("explorer"), 0
+    InitButtonIcons
+    Dim x As Long = REG_DWORD
+    pvEnumClasses
+    pvPopulateDevices
+    pvPruneUnused()
+    
+End Sub
+
+Private Sub OnExit() Handles mnuExit.Click
+    Unload Me
+End Sub
+
+[ Description ("Loads button icons from the resource file (which is was a compiled exe must exist to take them from when running in the IDE). ") ]
+Private Sub InitButtonIcons()
+    Select Case m_ScaleX
+        Case Is <= 1: cxyIconBtn = 24
+        Case Is <= 1.25: cxyIconBtn = 32
+        Case Is <= 1.5: cxyIconBtn = 48
+        Case Else: cxyIconBtn = 64
+    End Select
+    Dim hBtn As LongPtr = LoadImage(hModule, ByVal StrPtr(IDI_REFRESH), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
+    If hBtn Then ButtonIconAssign cmdEnum.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    DestroyIcon hBtn: hBtn = 0
+    hBtn = LoadImage(hModule, ByVal StrPtr(IDI_DISABLE), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
+    If hBtn Then ButtonIconAssign cmdDisable.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    DestroyIcon hBtn: hBtn = 0
+    hBtn = LoadImage(hModule, ByVal StrPtr(IDI_EJECT), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
+    If hBtn Then ButtonIconAssign cmdEject.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    DestroyIcon hBtn: hBtn = 0
+    hBtn = LoadImage(hModule, ByVal StrPtr(IDI_UNINST), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
+    If hBtn Then ButtonIconAssign cmdUninstall.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    DestroyIcon hBtn: hBtn = 0
+    hBtn = LoadImage(hModule, ByVal StrPtr(IDI_UPDATE), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
+    If hBtn Then ButtonIconAssign cmdUpdate.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    DestroyIcon hBtn: hBtn = 0
+    hBtn = LoadImage(hModule, ByVal StrPtr(IDI_REMOVE), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
+    If hBtn Then ButtonIconAssign cmdRem.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    DestroyIcon hBtn: hBtn = 0
+    hBtn = LoadImage(hModule, ByVal StrPtr(IDI_PLAIN), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
+    If hBtn Then ButtonIconAssign cmdEnable.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    DestroyIcon hBtn: hBtn = 0
+End Sub
+
+[ Description ("Assigns an HICON image to a CommandButton control with the given size and margins.") ]
+Private Sub ButtonIconAssign(hWnd As LongPtr, hIcon As LongPtr, cx As Long, CY As Long, margLeft As Long, margRight As Long, margTop As Long, margBottom As Long)
+
+On Error GoTo e0
+Dim bi4 As BUTTON_IMAGELIST
+bi4.himl = ImageList_Create(cx, CY, ILC_COLOR32 Or ILC_MASK, 1, 1)
+If bi4.himl Then
+    bi4.margin.Left = margLeft
+    bi4.margin.Right = margRight
+    bi4.margin.Top = margTop
+    bi4.margin.Bottom = margBottom
+    ImageList_ReplaceIcon bi4.himl, -1, hIcon
+    Call SendMessage(hWnd, BCM_SETIMAGELIST, 0&, bi4)
+End If
+
+On Error GoTo 0
+Exit Sub
+
+e0:
+Debug.Print "ButtonIconAssign.Error->" & Err.Description & " (" & Err.Number & ")"
+
+End Sub
+
+
+Private Sub OnUnload(Cancel As Integer) Handles Form.Unload
+    ImageList_Destroy himlMain
+    If hModule <> App.hInstance Then FreeLibrary hModule
+End Sub
+
+[ Description ("Enumerates all hardware classes and adds them to the DMSet array and as root nodes in the TreeView.") ]
+Private Sub pvEnumClasses()
+    On Error GoTo e0
+    Dim ret As BOOL
+    Dim cbReq As Long
+    Dim i As Long
+    Dim sBufN As String, sBufD As String
+    Dim cchReq As Long
+    Dim hIcon As LongPtr
+    
+    ret = SetupDiBuildClassInfoList(0, vbNullPtr, 0, cbReq)
+    
+    If cbReq > 0 Then
+        ReDim arClasses(cbReq - 1)
+
+        ret = SetupDiBuildClassInfoList(0, arClasses(0), UBound(arClasses) + 1, cbReq)
+        If ret Then
+           For i = 0 To UBound(arClasses) - 1
+           	    sBufN = String$(MAX_CLASS_NAME_LEN, 0)
+                ret = SetupDiClassNameFromGuid(arClasses(i), sBufN, Len(sBufN), cchReq)
+                If cchReq Then sBufN = Left$(sBufN, cchReq - 1)
+                cchReq = 0
+                ret = SetupDiGetClassDescription(arClasses(i), vbNullString, 0, cchReq)
+                If cchReq > 0 Then
+                    sBufD = String$(cchReq, 0)
+                    ret = SetupDiGetClassDescription(arClasses(i), sBufD, Len(sBufD), cchReq)
+                End If
+                
+                ret = SetupDiLoadClassIcon(arClasses(i), hIcon)
+                
+                ReDim Preserve DMSet(nItems)
+                DMSet(i).DispName = sBufN
+                DMSet(i).Desc = sBufD
+                DMSet(i).AsscGUID = arClasses(i)
+                If hIcon Then
+                    DMSet(i).nIcon = ImageList_AddIcon(himlMain, hIcon)
+                    DMSet(i).nIcon += 1
+                    DestroyIcon hIcon
+                End If
+                nItems += 1
+                'Debug.Print "Added class " & dbg_GUIDToString(arClasses(i)) & ": Name=" & sBufN & ", Description=" & sBufD
+           Next
+        End If
+    
+    End If
+    
+    If nItems Then
+        Dim oNode As Node
+        For i = 0 To UBound(DMSet)
+        	Set oNode = TreeView1.Nodes.Add(, , , DMSet(i).Desc, DMSet(i).nIcon)
+            DMSet(i).hItem = oNode.Handle
+            oNode.Key = CVar(CStr(i))
+            oNode.Sorted = True
+        Next
+    End If
+        
+    Exit Sub
+e0:
+Debug.Print CurrentComponentName & "." & CurrentProcedureName & "->Error: " & Err.Number & " (" & Err.Number & "); LastDllError=0x" & Hex$(Err.LastDllError)
+            
+End Sub
+
+[ Description ("Goes through the class list from pvEnumClasses and adds all installed devices for each category. Then, looks for devices with no associated class (which includes the 'Unknown' class), and adds them as 'Other devices'.") ]
+Private Sub pvPopulateDevices()
+    On Error GoTo e0
+    
+	Dim hSet As LongPtr
+    Dim i As Long, j As Long
+    Dim hIcon As LongPtr
+    Dim tDevInfo As SP_DEVINFO_DATA
+    Dim sBufN As String
+    Dim sBufID As String
+    Dim cbReq As Long
+    Dim cchReq As Long
+    Dim ret As BOOL
+    Dim regType As REGTYPES
+    Dim dwCap As SetupDevCap
+    Dim dwStatus As CfgMgDevNodeStatus
+    Dim nProbCode As CfgMgrProblems
+    Dim nPT As DEVPROPTYPE
+    Dim bProblem As Boolean
+    Dim sBufP As String
+    Dim cchProb As Long
+    Dim fPresent As BOOL
+    Dim dwState As TVITEM_State, dwMask As TVITEM_State
+    
+    For i = 0 To UBound(DMSet)
+        If DMSet(i).bDevice Then Continue For
+        
+        'Is a class
+        hSet = SetupDiGetClassDevs(DMSet(i).AsscGUID, vbNullString, Me.hWnd, IIf(Check3.Value = vbChecked, 0&, DIGCF_PRESENT))
+        If hSet = INVALID_HANDLE_VALUE Then Continue For
+        	
+        tDevInfo.cbSize = LenB(tDevInfo)
+        j = 0
+        
+        Do While SetupDiEnumDeviceInfo(hSet, j, tDevInfo)
+            cchReq = 0: cbReq = 0
+            sBufN = "": sBufID = "": sBufP = ""
+            dwCap = 0: bProblem = False
+            dwStatus = 0: nProbCode = 0
+            fPresent = 0
+            dwMask = 0: dwState = 0
+            ret = SetupDiGetDeviceInstanceId(hSet, tDevInfo, vbNullString, 0, cchReq)
+            If cchReq Then
+                sBufID = String$(cchReq, 0)
+                ret = SetupDiGetDeviceInstanceId(hSet, tDevInfo, sBufID, Len(sBufID), cchReq)
+                If InStr(sBufID, Chr$(0)) > 1 Then
+                    sBufID = Left$(sBufID, InStr(sBufID, Chr$(0)) - 1)
+                End If
+            End If
+        	ret = SetupDiGetDeviceRegistryProperty(hSet, tDevInfo, SPDRP_CAPABILITIES, regType, dwCap, LenB(dwCap), cbReq)
+            cbReq = 0
+            sBufN = String$(80, 0)
+            ret = SetupDiGetDeviceRegistryPropertyW(hSet, tDevInfo, SPDRP_FRIENDLYNAME, regType, ByVal StrPtr(sBufN), LenB(sBufN), cbReq)
+            If Err.LastDllError = ERROR_INVALID_DATA Then 'No friendly name
+                cbReq = 0
+            	ret = SetupDiGetDeviceRegistryPropertyW(hSet, tDevInfo, SPDRP_DEVICEDESC, regType, ByVal 0, 0, cbReq)
+                If cbReq Then
+                    sBufN = String$(cbReq / 2, 0)
+                    ret = SetupDiGetDeviceRegistryPropertyW(hSet, tDevInfo, SPDRP_DEVICEDESC, regType, ByVal StrPtr(sBufN), LenB(sBufN), cbReq)
+                End If
+                If Left$(sBufN, 1) = vbNullChar Then
+                    sBufN = sBufID
+                    Debug.Print "Name fallback; no FN, no DD " & sBufID
+                End If
+            Else
+                If InStr(sBufN, Chr$(0)) > 1 Then
+                    sBufN = Left$(sBufN, InStr(sBufN, Chr$(0)) - 1)
+                Else
+                    sBufN = sBufID
+                End If
+            End If
+            
+            If CM_Get_DevNode_Status(dwStatus, nProbCode, tDevInfo.DevInst, 0) = CR_SUCCESS Then
+            	If (dwStatus And DN_HAS_PROBLEM) = DN_HAS_PROBLEM Then
+                	bProblem = True
+                    cbReq = 0
+                    sBufP = String$(1024, 0)
+                    cchProb = DeviceProblemTextW(0, tDevInfo.DevInst, nProbCode, StrPtr(sBufP), Len(sBufP))
+                    If cchProb Then
+                        sBufP = Left$(sBufP, cchProb)
+                    Else
+                        sBufP = "Unknown problem, code " & nProbCode
+                    End If
+            	End If
+            End If
+            
+            If Check3.Value = vbChecked Then
+                ret = SetupDiGetDeviceProperty(hSet, tDevInfo, DEVPKEY_Device_IsPresent, nPropType, fPresent, LenB(Of BOOL), cbReq, 0)
+            Else
+            	fPresent = CTRUE
+            End If
+            
+            ret = SetupDiLoadDeviceIcon(hSet, tDevInfo, cxyIcon, cxyIcon, 0, hIcon)
+            
+            'Debug.Print "AddDevice " & sBufN & "=>" & sBufID
+            ReDim Preserve DMSet(nItems)
+            With DMSet(nItems)
+                .AsscGUID = tDevInfo.ClassGuid
+                .bDevice = True
+                .dvi = tDevInfo.DevInst
+                If sBufN = "" Then
+                    .DispName =	.InstId
+                Else
+                    .DispName = sBufN
+                End If
+                .DevCap = dwCap
+                .InstId = sBufID
+                If hIcon Then
+                    .nIcon = ImageList_AddIcon(himlMain, hIcon)
+                    .nIcon += 1
+                    DestroyIcon hIcon
+                    hIcon = 0
+                End If
+
+                Dim oNodePar As Node
+                Set oNodePar = pvNodeFromHandle(DMSet(i).hItem)
+                Dim oNode As Node
+                Set oNode = TreeView1.Nodes.Add(oNodePar, tvwChild, CVar(CStr(nItems)), DMSet(nItems).DispName, DMSet(nItems).nIcon)
+                .hItem = oNode.Handle
+                .hItemPar = oNodePar.Handle
+                
+                If bProblem Then
+                	.ProblemCode = nProbCode
+                    .ProblemText = sBufP
+                    If nProbCode = CM_PROB_DISABLED Then
+                        dwState = INDEXTOOVERLAYMASK(3)
+                    Else
+                        dwState = INDEXTOOVERLAYMASK(1)
+                    End If
+                    dwMask = TVIS_OVERLAYMASK
+                End If
+                If fPresent = 0 Then
+                	dwState = dwState Or TVIS_CUT
+                    dwMask = dwMask Or TVIS_CUT
+                End If
+                If dwMask Then TreeView_SetItemState TreeView1.hWnd, oNode.Handle, dwState, dwMask
+            End With
+            nItems += 1
+            nDevices += 1
+            j += 1
+            tDevInfo.cbSize = LenB(tDevInfo)
+        Loop
+    Next
+    
+    Debug.Print "Completed primary device enum, loading Other Devices"
+    'Enumerate 'Other devices' -- those without a setup class
+    
+    Dim hSetUnk As LongPtr = SetupDiGetClassDevsW(vbNullPtr, 0, 0, IIf(Check3.Value = vbChecked, DIGCF_ALLCLASSES, DIGCF_ALLCLASSES Or DIGCF_PRESENT))
+    If hSetUnk Then
+    	Dim spdid As SP_DEVINFO_DATA
+        Dim nPropType As DEVPROPTYPE
+        Dim tDevGuid As UUID
+        Dim oNodeOther As Node
+
+        spdid.cbSize = LenB(Of SP_DEVINFO_DATA)
+        j = 0
+        Do While SetupDiEnumDeviceInfo(hSetUnk, j, spdid)
+        	j += 1
+            ret = SetupDiGetDeviceProperty(hSetUnk, spdid, DEVPKEY_Device_Class, nPropType, tDevGuid, LenB(Of UUID), cbReq, 0)
+            If (ret = 0) Or (nPropType <> DEVPROP_TYPE_GUID) Then
+            	If Err.LastDllError = ERROR_NOT_FOUND Then
+                
+
+                     cchReq = 0: cbReq = 0
+                     sBufN = "": sBufID = "": sBufP = ""
+                     dwCap = 0: bProblem = False
+                     dwStatus = 0: nProbCode = 0
+                     fPresent = 0
+                     dwState = 0: dwMask = 0
+                    ret = SetupDiGetDeviceInstanceId(hSetUnk, spdid, vbNullString, 0, cchReq)
+                    If cchReq Then
+                        sBufID = String$(cchReq, 0)
+                        ret = SetupDiGetDeviceInstanceId(hSetUnk, spdid, sBufID, Len(sBufID), cchReq)
+                        If InStr(sBufID, Chr$(0)) > 1 Then
+                            sBufID = Left$(sBufID, InStr(sBufID, Chr$(0)) - 1)
+                        End If
+                    End If
+                    ret = SetupDiGetDeviceRegistryProperty(hSetUnk, spdid, SPDRP_CAPABILITIES, regType, dwCap, 4, cbReq)
+                    cbReq = 0
+                    sBufN = String$(80, 0)
+                    ret = SetupDiGetDeviceRegistryPropertyW(hSetUnk, spdid, SPDRP_FRIENDLYNAME, regType, ByVal StrPtr(sBufN), LenB(sBufN), cbReq)
+                    If Err.LastDllError = ERROR_INVALID_DATA Then 'No friendly name
+                        cbReq = 0
+                        ret = SetupDiGetDeviceRegistryPropertyW(hSetUnk, spdid, SPDRP_DEVICEDESC, regType, ByVal 0, 0, cbReq)
+                        If cbReq Then
+                            sBufN = String$(cbReq / 2, 0)
+                            ret = SetupDiGetDeviceRegistryPropertyW(hSetUnk, spdid, SPDRP_DEVICEDESC, regType, ByVal StrPtr(sBufN), LenB(sBufN), cbReq)
+                        End If
+                        If Left$(sBufN, 1) = vbNullChar Then
+                            sBufN = sBufID
+                            Debug.Print "Name fallback; no FN, no DD " & sBufID
+                        End If
+                    Else
+                        If InStr(sBufN, Chr$(0)) > 1 Then
+                            sBufN = Left$(sBufN, InStr(sBufN, Chr$(0)) - 1)
+                        Else
+                            sBufN = sBufID
+                        End If
+                    End If
+                    
+                    If sBufN = "HTREE\ROOT\0" Then Continue Do 'Not a device; just the tree root object.
+                    
+                    If CM_Get_DevNode_Status(dwStatus, nProbCode, spdid.DevInst, 0) = CR_SUCCESS Then
+                        If (dwStatus And DN_HAS_PROBLEM) = DN_HAS_PROBLEM Then
+                            bProblem = True
+                            cbReq = 0
+                            sBufP = String$(1024, 0)
+                            cchProb = DeviceProblemTextW(0, spdid.DevInst, nProbCode, StrPtr(sBufP), Len(sBufP))
+                            Debug.Print "GetProblemText ret=" & cchProb & ", Err=" & Err.LastDllError & IIf(Err.LastDllError, GetSystemErrorString(Err.LastDllError), "")
+                            If cchProb Then
+                            	sBufP = Left$(sBufP, cchProb)
+                            Else
+                                sBufP = "Unknown problem, code " & nProbCode
+                            End If
+                        End If
+                    End If
+                    
+                    If Check3.Value = vbChecked Then
+                        ret = SetupDiGetDeviceProperty(hSetUnk, spdid, DEVPKEY_Device_IsPresent, nPropType, fPresent, LenB(Of BOOL), cbReq, 0)
+                    Else
+                        fPresent = CTRUE
+                    End If
+                    
+                    ret = SetupDiLoadDeviceIcon(hSetUnk, spdid, cxyIcon, cxyIcon, 0, hIcon)
+                    
+                    If oNodeOther Is Nothing Then
+                        'Add 'Other devices' parent node
+                        ReDim Preserve DMSet(nItems)
+                        DMSet(nItems).DispName = "Other devices"
+                        DMSet(nItems).Desc = "Other devices"
+                        'DMSet(i).AsscGUID = arClasses(i)
+                        hIcon = LoadImage(hModule, ByVal StrPtr(IDI_ICONUNK), IMAGE_ICON, cxyIcon, cxyIcon, LR_DEFAULTCOLOR Or LR_SHARED)
+                        If hIcon Then
+                            DMSet(nItems).nIcon = ImageList_AddIcon(himlMain, hIcon)
+                            DMSet(nItems).nIcon += 1
+                            DestroyIcon hIcon
+                        End If
+                       
+                        Set oNodeOther = TreeView1.Nodes.Add(, , , DMSet(nItems).Desc, DMSet(nItems).nIcon)
+                        DMSet(nItems).hItem = oNodeOther.Handle
+                        oNodeOther.Key = CVar(CStr(nItems))
+                        oNodeOther.Sorted = True
+                        
+                        nItems += 1
+                     End If
+                
+                    
+                    'Debug.Print "AddOtherDevice " & sBufN & "=>" & sBufID
+                    ReDim Preserve DMSet(nItems)
+                    With DMSet(nItems)
+                        .AsscGUID = tDevInfo.ClassGuid
+                        .bDevice = True
+                        .dvi = tDevInfo.DevInst
+                        If sBufN = "" Then
+                            .DispName = .InstId
+                        Else
+                            .DispName = sBufN
+                        End If
+                        .DevCap = dwCap
+                        .InstId = sBufID
+                        
+                        If hIcon = 0 Then
+                            hIcon = LoadImage(hModule, ByVal StrPtr(IDI_ICONUNK), IMAGE_ICON, cxyIcon, cxyIcon, LR_DEFAULTCOLOR Or LR_SHARED)
+                        End If
+                        If hIcon Then
+                            .nIcon = ImageList_AddIcon(himlMain, hIcon)
+                            .nIcon += 1
+                            DestroyIcon hIcon
+                            hIcon = 0
+                        End If
+
+                        Set oNode = TreeView1.Nodes.Add(oNodeOther, tvwChild, CVar(CStr(nItems)), DMSet(nItems).DispName, DMSet(nItems).nIcon)
+                        .hItem = oNode.Handle
+                        .hItemPar = oNodeOther.Handle
+                        If bProblem Then
+                            .ProblemCode = nProbCode
+                            .ProblemText = sBufP
+                            If nProbCode = CM_PROB_DISABLED Then
+                            	dwState = INDEXTOOVERLAYMASK(3)
+                            Else
+                            	dwState = INDEXTOOVERLAYMASK(1)
+                            End If
+                            dwMask = TVIS_OVERLAYMASK
+                        End If
+                        If fPresent = 0 Then
+                            dwState = dwState Or TVIS_CUT
+                            dwMask = dwMask Or TVIS_CUT
+                        End If
+                        If dwMask Then TreeView_SetItemState TreeView1.hWnd, oNode.Handle, dwState, dwMask
+                    End With
+                    nItems += 1
+                    nDevices += 1
+                    j += 1
+                
+            	End If
+            End If
+        Loop
+        SetupDiDestroyDeviceInfoList hSetUnk
+    End If
+    
+    SetupDiDestroyDeviceInfoList hSet
+    
+    txtStatus.Text = "Found " & CStr(nDevices) & " devices."
+    RedrawWindow txtStatus.hWnd, vbNullPtr, 0, RDW_ALLCHILDREN Or RDW_ERASENOW Or RDW_INVALIDATE
+    UpdateWindow txtStatus.hWnd
+    Debug.Print "StatusText=" & txtStatus.Text
+    ' txtStatus.SyncToSource()
+    Exit Sub
+e0:
+Debug.Print CurrentComponentName & "." & CurrentProcedureName & "->Error: " & Err.Number & " (" & Err.Number & "); LastDllError=0x" & Hex$(Err.LastDllError)
+If hSet Then SetupDiDestroyDeviceInfoList hSet
+If hSetUnk Then SetupDiDestroyDeviceInfoList hSetUnk
+End Sub
+
+[ Description ("Sets overlay icons for the device tree: 0 = None, 1 = Problem (warning icon), 2 = Info icon, 3 = Disabled by user icon. ") ]
+Private Sub SetItemOverlayIndex(ByVal hItem As LongPtr, ByVal nIndex As Long)
+    TreeView_SetItemState TreeView1.hWnd, hItem, INDEXTOOVERLAYMASK(nIndex), TVIS_OVERLAYMASK
+End Sub
+
+[ Description ("Shows the standard properties window for a given device.") ]
+Private Sub pvShowPropPage(idx As Long)
+On Error GoTo e0
+Dim hSet As LongPtr
+Dim j As Long
+Dim tDevInfo As SP_DEVINFO_DATA
+Dim sBufN As String
+Dim sBufID As String
+Dim npReq As Long
+Dim cchReq As Long
+Dim ret As BOOL
+    
+    hSet = SetupDiGetClassDevs(DMSet(idx).AsscGUID, vbNullString, Me.hWnd, DIGCF_ALLCLASSES)
+    If hSet = INVALID_HANDLE_VALUE Then
+        Debug.Print "Error getting classes for prop page search."
+        Exit Sub
+    End If
+        
+    tDevInfo.cbSize = LenB(tDevInfo)
+    j = 0
+    
+    Do While SetupDiEnumDeviceInfo(hSet, j, tDevInfo)
+        cchReq = 0
+        sBufN = "": sBufID = ""
+        ret = SetupDiGetDeviceInstanceId(hSet, tDevInfo, vbNullString, 0, cchReq)
+        If cchReq Then
+            sBufID = String$(cchReq, 0)
+            ret = SetupDiGetDeviceInstanceId(hSet, tDevInfo, sBufID, Len(sBufID), cchReq)
+            If InStr(sBufID, Chr$(0)) > 1 Then
+                sBufID = Left$(sBufID, InStr(sBufID, Chr$(0)) - 1)
+            End If
+        End If
+        If sBufID = DMSet(idx).InstId Then
+            Debug.Print "DevId=" & sBufID
+            'DeviceProperties_RunDLL Me.hWnd, 0, "/DeviceId " & sBufID, SW_SHOW
+            'That's the official way, but for some bizarre reason it activates DPI awareness
+            'if it's not already on; that makes the window tiny. Calling the API it wraps
+            'directly avoids the problem. No, 0 for hwnd/hinst doesn't change anything.
+            'Plus here we can add the resources tab; I don't know how to specify that flag
+            'for the command line version.
+            DevicePropertiesEx Me.hWnd, vbNullString, sBufID, DEVPROP_SHOW_RESOURCE_TAB, 0 'DEVPROP_SHOW_RESOURCE_TAB doesn't seem to work under WOW64
+        End If
+        j += 1
+        tDevInfo.cbSize = LenB(tDevInfo)
+    Loop
+    If hSet Then SetupDiDestroyDeviceInfoList hSet
+    Exit Sub
+e0:
+Debug.Print CurrentComponentName & "." & CurrentProcedureName & "->Error: " & Err.Number & " (" & Err.Number & "); LastDllError=0x" & Hex$(Err.LastDllError)
+If hSet Then SetupDiDestroyDeviceInfoList hSet
+End Sub
+
+[ Description ("Retrieves a device set handle (hSet) and SP_DEVINFO_DATA type (pInfo) given a device index (idx). " & vbCrLf & "Important: It is the callers responsibility to free the device info list when True is returned.") ]
+Private Function DevInfoDataFromIndex(ByVal idx As Long, /* out */ hSet As LongPtr, /* out */ pInfo As SP_DEVINFO_DATA) As Boolean
+    On Error GoTo e0
+    Dim i As Long, j As Long
+    Dim sBufID As String
+    Dim npReq As Long
+    Dim cchReq As Long
+    Dim ret As BOOL
+    
+    hSet = SetupDiGetClassDevs(DMSet(idx).AsscGUID, vbNullString, Me.hWnd, DIGCF_ALLCLASSES)
+    If hSet = INVALID_HANDLE_VALUE Then Return Err.LastDllError
+        
+    pInfo.cbSize = LenB(Of SP_DEVINFO_DATA)
+    j = 0
+    
+    Do While SetupDiEnumDeviceInfo(hSet, j, pInfo)
+        cchReq = 0
+        sBufID = ""
+        ret = SetupDiGetDeviceInstanceId(hSet, pInfo, vbNullString, 0, cchReq)
+        If cchReq Then
+            sBufID = String$(cchReq, 0)
+            ret = SetupDiGetDeviceInstanceId(hSet, pInfo, sBufID, Len(sBufID), cchReq)
+            If InStr(sBufID, Chr$(0)) > 1 Then
+                sBufID = Left$(sBufID, InStr(sBufID, Chr$(0)) - 1)
+            End If
+        End If
+        If sBufID = DMSet(idx).InstId Then
+        	Return True
+        End If
+        j += 1
+        pInfo.cbSize = LenB(pInfo)
+    Loop
+    If hSet Then SetupDiDestroyDeviceInfoList hSet
+    Return False
+    e0:
+    Debug.Print CurrentComponentName & "." & CurrentProcedureName & "->Error: " & Err.Number & " (" & Err.Number & "); LastDllError=0x" & Hex$(Err.LastDllError)
+    If hSet Then SetupDiDestroyDeviceInfoList hSet
+    
+End Function
+
+Private Function pvEnableDevice(idx As Long, fEnable As Boolean) As Long
+On Error GoTo e0
+Dim hSet As LongPtr
+Dim i As Long, j As Long
+Dim tDevInfo As SP_DEVINFO_DATA
+Dim tParams As SP_PROPCHANGE_PARAMS
+Dim sBufN As String
+Dim sBufID As String
+Dim cchReq As Long
+Dim ret As BOOL
+    
+    hSet = SetupDiGetClassDevs(DMSet(idx).AsscGUID, vbNullString, Me.hWnd, DIGCF_ALLCLASSES)
+    If hSet = INVALID_HANDLE_VALUE Then Return Err.LastDllError
+        
+    tDevInfo.cbSize = LenB(Of SP_DEVINFO_DATA)
+    j = 0
+    
+    Do While SetupDiEnumDeviceInfo(hSet, j, tDevInfo)
+        cchReq = 0
+        sBufN = "": sBufID = ""
+        ret = SetupDiGetDeviceInstanceId(hSet, tDevInfo, vbNullString, 0, cchReq)
+        If cchReq Then
+            sBufID = String$(cchReq, 0)
+            ret = SetupDiGetDeviceInstanceId(hSet, tDevInfo, sBufID, Len(sBufID), cchReq)
+            If InStr(sBufID, Chr$(0)) > 1 Then
+                sBufID = Left$(sBufID, InStr(sBufID, Chr$(0)) - 1)
+            End If
+        End If
+        If sBufID = DMSet(idx).InstId Then
+            tParams.ClassInstallHeader.cbSize = LenB(Of SP_CLASSINSTALL_HEADER)
+            tParams.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE
+            If fEnable Then
+                tParams.StateChange = DICS_ENABLE
+            Else
+                tParams.StateChange = DICS_DISABLE
+            End If
+            tParams.Scope = DICS_FLAG_CONFIGSPECIFIC
+            ret = SetupDiSetClassInstallParams(hSet, tDevInfo, tParams, LenB(Of SP_PROPCHANGE_PARAMS))
+            If ret Then
+                ret = SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, hSet, tDevInfo)
+                If ret Then
+                	SetItemOverlayIndex(DMSet(idx).hItem, IIf(fEnable, 0, 3))
+                    SetupDiDestroyDeviceInfoList hSet
+                    Return S_OK
+                Else
+                    ret = Err.LastDllError
+                	Debug.Print "Failed to disable device; SetupDiCallClassInstaller->" Err.LastDllError & ", " & GetSystemErrorString(Err.LastDllError)
+                    SetupDiDestroyDeviceInfoList hSet
+                    Return ret
+                End If
+            Else
+            	ret = Err.LastDllError
+                SetupDiDestroyDeviceInfoList hSet
+                Return ret
+            End If
+        End If
+        
+        j += 1
+        tDevInfo.cbSize = LenB(tDevInfo)
+    Loop
+    If hSet Then SetupDiDestroyDeviceInfoList hSet
+    Return S_FALSE
+e0:
+Debug.Print CurrentComponentName & "." & CurrentProcedureName & "->Error: " & Err.Number & " (" & Err.Number & "); LastDllError=0x" & Hex$(Err.LastDllError)
+If hSet Then SetupDiDestroyDeviceInfoList hSet
+End Function
+
+Private Function pvRemoveDevice(idx As Long) As Long
+On Error GoTo e0
+Dim hSet As LongPtr
+Dim i As Long, j As Long
+Dim tDevInfo As SP_DEVINFO_DATA
+Dim pPages As LongPtr
+Dim tParams As SP_REMOVEDEVICE_PARAMS
+Dim sBufN As String
+Dim sBufID As String
+Dim npReq As Long
+Dim cchReq As Long
+Dim ret As BOOL
+Dim regType As REGTYPES
+    
+    hSet = SetupDiGetClassDevs(DMSet(idx).AsscGUID, vbNullString, Me.hWnd, DIGCF_ALLCLASSES)
+    If hSet = INVALID_HANDLE_VALUE Then Return Err.LastDllError
+        
+    tDevInfo.cbSize = LenB(Of SP_DEVINFO_DATA)
+    j = 0
+    
+    Do While SetupDiEnumDeviceInfo(hSet, j, tDevInfo)
+        cchReq = 0
+        sBufN = "": sBufID = ""
+        ret = SetupDiGetDeviceInstanceId(hSet, tDevInfo, vbNullString, 0, cchReq)
+        If cchReq Then
+            sBufID = String$(cchReq, 0)
+            ret = SetupDiGetDeviceInstanceId(hSet, tDevInfo, sBufID, Len(sBufID), cchReq)
+            If InStr(sBufID, Chr$(0)) > 1 Then
+                sBufID = Left$(sBufID, InStr(sBufID, Chr$(0)) - 1)
+            End If
+        End If
+        If sBufID = DMSet(idx).InstId Then
+            tParams.ClassInstallHeader.cbSize = LenB(Of SP_CLASSINSTALL_HEADER)
+            tParams.ClassInstallHeader.InstallFunction = DIF_REMOVE
+            tParams.Scope = DI_REMOVEDEVICE_GLOBAL
+            ret = SetupDiSetClassInstallParams(hSet, tDevInfo, tParams, LenB(Of SP_REMOVEDEVICE_PARAMS))
+            If ret Then
+                ret = SetupDiCallClassInstaller(DIF_REMOVE, hSet, tDevInfo)
+                If ret Then
+                    SetupDiDestroyDeviceInfoList hSet
+                    Return S_OK
+                Else
+                	ret = Err.LastDllError
+                    Debug.Print "Failed to remove device; SetupDiCallClassInstaller->" Err.LastDllError & ", " & GetSystemErrorString(Err.LastDllError)
+                    SetupDiDestroyDeviceInfoList hSet
+                    Return ret
+                End If
+            Else
+                ret = Err.LastDllError
+                SetupDiDestroyDeviceInfoList hSet
+                Return ret
+            End If
+        End If
+        
+        j += 1
+        tDevInfo.cbSize = LenB(tDevInfo)
+    Loop
+    If hSet Then SetupDiDestroyDeviceInfoList hSet
+    Return S_FALSE
+e0:
+Debug.Print CurrentComponentName & "." & CurrentProcedureName & "->Error: " & Err.Number & " (" & Err.Number & "); LastDllError=0x" & Hex$(Err.LastDllError)
+If hSet Then SetupDiDestroyDeviceInfoList hSet
+End Function
+
+[ Description ("Returns a Node object given an HTREEITEM handle.") ]
+Private Function pvNodeFromHandle(hItem As LongPtr) As Node
+	Dim oNode As Node
+    For Each oNode In TreeView1.Nodes
+        If oNode.Handle = hItem Then
+            Set pvNodeFromHandle = oNode
+        End If
+	Next
+End Function
+
+[ Description ("Returns the DMSet items for the TreeView node represented by it's handle (HITEM)") ]
+Private Function pvItemIndexFromHITEM(ByVal hItem As LongPtr) As Long
+	Dim i As Long
+    For i = 0 To UBound(DMSet)
+    	If DMSet(i).hItem = hItem Then Return i
+    Next
+    Return -1
+End Function
+
+[ Description ("Prunes unused device categories from the tree.") ]
+Private Function pvPruneUnused() As Boolean
+	Dim pNode As Node
+    For Each pNode In TreeView1.Nodes
+        If DMSet(CLng(pNode.Key)).bDevice = False Then
+            If pNode.Children = 0 Then
+                TreeView1.Nodes.Remove pNode.Index
+            End If
+        End If
+    Next
+End Function
+
+
+
+Private Sub OnRefresh() Handles cmdEnum.Click, mnuRefresh.Click
+	
+    TreeView1.Nodes.Clear
+    
+    ReDim arClasses(0)
+    ReDim DMSet(0)
+    nItems = 0
+    nDevices = 0
+    
+    pvEnumClasses
+    
+    pvPopulateDevices
+    
+    If Check1.Value = vbUnchecked Then Call pvPruneUnused()
+    
+End Sub
+
+
+Private Sub OnCmdPruneClick() Handles cmdPrune.Click
+    pvPruneUnused
+End Sub
+
+
+
+Private Sub TreeView1_DblClick() Handles TreeView1.DblClick, mnuProps.Click
+    Dim selIdx As Long = pvItemIndexFromHITEM(TreeView1.SelectedItem.Handle)
+    If DMSet(selIdx).bDevice = False Then
+        txtStatus.Text = "Please select a specific device."
+        Exit Sub
+    End If
+    idxSelected = selIdx
+    pvShowPropPage selIdx
+End Sub
+
+Private Sub OnEnableDevice() Handles cmdEnable.Click, mnuEnable.Click
+    If TreeView1.SelectedItem Is Nothing Then
+        txtStatus.Text = "Please select a specific device."
+        Beep
+        Exit Sub
+    End If
+    Dim selIdx As Long = pvItemIndexFromHITEM(TreeView1.SelectedItem.Handle)
+    If DMSet(selIdx).bDevice = False Then
+        txtStatus.Text = "Please select a specific device."
+        Exit Sub
+    End If
+    Dim ret As Long = pvEnableDevice(selIdx, True)
+    If ret = S_OK Then
+    	txtStatus.Text = "Successfully enabled " & DMSet(selIdx).DispName
+    Else
+    	If ret = S_FALSE Then
+    	    txtStatus.Text = "Couldn't obtain device reference."
+        Else
+        	txtStatus.Text = "An error occured enabling device: " & ret & ", " & GetSystemErrorString(ret)
+        End If
+    End If
+End Sub
+
+Private Sub OnDisableDevice() Handles cmdDisable.Click, mnuDisable.Click
+    If TreeView1.SelectedItem Is Nothing Then
+        txtStatus.Text = "Please select a specific device."
+        Beep
+        Exit Sub
+    End If
+    Dim selIdx As Long = pvItemIndexFromHITEM(TreeView1.SelectedItem.Handle)
+    If DMSet(selIdx).bDevice = False Then
+    txtStatus.Text = "Please select a specific device."
+        Exit Sub
+    End If
+    Dim ret As Long = pvEnableDevice(selIdx, True)
+    If ret = S_OK Then
+        txtStatus.Text = "Successfully enabled " & DMSet(selIdx).DispName
+    Else
+        If ret = S_FALSE Then
+            txtStatus.Text = "Couldn't obtain device reference."
+        Else
+            txtStatus.Text = "An error occured disabling device: " & ret & ", " & GetSystemErrorString(ret)
+        End If
+    End If
+    
+End Sub
+
+Private Sub OnRemoveDevice() Handles cmdRem.Click, mnuRemove.Click
+    If TreeView1.SelectedItem Is Nothing Then
+        txtStatus.Text = "Please select a specific device."
+        Beep
+        Exit Sub
+    End If
+    Dim selIdx As Long = pvItemIndexFromHITEM(TreeView1.SelectedItem.Handle)
+    If DMSet(selIdx).bDevice = False Then
+        txtStatus.Text = "Please select a specific device."
+        Exit Sub
+    End If
+    Dim ret As Long = pvRemoveDevice(selIdx)
+    If ret = S_OK Then
+        txtStatus.Text = "Successfully removed " & DMSet(selIdx).DispName
+    Else
+        If ret = S_FALSE Then
+            txtStatus.Text = "Couldn't obtain device reference."
+        Else
+            txtStatus.Text = "An error occured removing device: " & ret & ", " & GetSystemErrorString(ret)
+        End If
+    End If
+End Sub
+
+Private Sub OnEjectDevice() Handles cmdEject.Click, mnuEject.Click
+    If TreeView1.SelectedItem Is Nothing Then
+        txtStatus.Text = "Please select a specific device."
+        Beep
+        Exit Sub
+    End If
+    Dim selIdx As Long = pvItemIndexFromHITEM(TreeView1.SelectedItem.Handle)
+    If DMSet(selIdx).bDevice = False Then
+        txtStatus.Text = "Please select a specific device."
+        Exit Sub
+    End If
+    pvEjectDevice selIdx
+End Sub
+
+Private Sub OnUpdateDevice() Handles cmdUpdate.Click
+    If TreeView1.SelectedItem Is Nothing Then
+        txtStatus.Text = "Please select a specific device."
+        Beep
+        Exit Sub
+    End If
+    Dim selIdx As Long = pvItemIndexFromHITEM(TreeView1.SelectedItem.Handle)
+    If DMSet(selIdx).bDevice = False Then
+        txtStatus.Text = "Please select a specific device."
+        Exit Sub
+    End If
+    Dim pInfo As SP_DEVINFO_DATA
+    Dim hSet As LongPtr
+    
+    If DevInfoDataFromIndex(selIdx, hSet, pInfo) Then
+        Dim lRet As BOOL
+        lRet = DiShowUpdateDevice(Me.hWnd, hSet, pInfo, 0, ByVal 0)
+        txtStatus.Text = "Update wizard completed or cancelled."
+    End If
+End Sub
+
+Private Sub TreeView1_NodeSelect(ByVal Node As Node) Handles TreeView1.NodeSelect
+    Debug.Print "NodeSelect " & Node.Index
+    Dim selIdx As Long = pvItemIndexFromHITEM(Node.Handle)
+    If DMSet(selIdx).bDevice Then
+    	idxSelected = selIdx
+    	DoCaps selIdx
+        If DMSet(selIdx).ProblemCode Then
+        	txtStatus.Text &= "Problem: " & DMSet(selIdx).ProblemText
+            Debug.Print "StatusText=" & txtStatus.Text
+        End If
+    Else
+    	txtStatus.Text = ""
+    End If
+End Sub
+
+Private Sub DoCaps(idx As Long)
+
+    Dim dwCap As SetupDevCap = DMSet(idx).DevCap
+    Dim sCap As String
+
+    If (dwCap And CM_DEVCAP_EJECTSUPPORTED) = CM_DEVCAP_EJECTSUPPORTED Then
+        sCap = "Eject supported, "
+    End If
+    If (dwCap And CM_DEVCAP_REMOVABLE) = CM_DEVCAP_REMOVABLE Then
+        sCap &= "Remove supported, "
+    Else
+        sCap = Replace(sCap, ", ", " ")
+    End If
+    If sCap = "" Then
+        sCap = "Eject and remove likely unsupported "
+    End If
+    txtStatus.Text = sCap & "for " & DMSet(idx).DispName & ". "
+    
+End Sub
+
+Private Sub OnUninstall() Handles cmdUninstall.Click, mnuUninstall.Click
+    If TreeView1.SelectedItem Is Nothing Then
+        txtStatus.Text = "Please select a specific device."
+        Beep
+        Exit Sub
+    End If
+    Dim selIdx As Long = pvItemIndexFromHITEM(TreeView1.SelectedItem.Handle)
+    If DMSet(selIdx).bDevice = False Then
+        txtStatus.Text = "Please select a specific device."
+        Exit Sub
+    End If
+    Dim pInfo As SP_DEVINFO_DATA
+    Dim hSet As LongPtr
+    
+    If DevInfoDataFromIndex(selIdx, hSet, pInfo) Then
+    	Dim lRet As BOOL
+        'ByVal 0 for NeedsReboot lets the system handle presenting the dialog and restarting.
+        If DiUninstallDevice(Me.hWnd, hSet, pInfo, 0, ByVal 0) Then
+        	txtStatus.Text = "Successfully uninstalled device."
+            TreeView1.Nodes.Remove TreeView1.SelectedItem.Index
+        Else
+        	txtStatus.Text = "Error uninstalling device, " & Err.LastDllError & ": " & GetSystemErrorString(Err.LastDllError)
+        End If
+    End If
+End Sub
+
+
+Private Sub pvEjectDevice(idx As Long)
+	Dim szVeto As String = String$(MAX_PATH, 0)
+    Dim lpVeto As PNP_VETO_TYPE
+    Dim lRet As CONFIGRET
+    If Check2.Value = vbChecked Then
+        Dim dnPar As Long
+        Dim i As Long
+        lRet = CM_Get_Parent(dnPar, DMSet(idx).dvi, 0)
+        If lRet <> CR_SUCCESS Then
+            txtStatus.Text = "Error: Couldn't get device parent, try ejecting directly."
+            Exit Sub
+        End If
+        For i = 0 To 2
+            lRet = CM_Request_Device_Eject(dnPar, lpVeto, szVeto, MAX_PATH, 0)
+            If (lRet = CR_SUCCESS) And (lpVeto = PNP_VetoTypeUnknown) Then
+                txtStatus.Text = "Device parent ejected."
+                Exit Sub
+            Else
+                If lpVeto Then
+                    If InStr(szVeto, vbNullChar) > 1 Then
+                        szVeto = Left$(szVeto, InStr(szVeto, vbNullChar) - 1)
+                        txtStatus.Text = szVeto
+                    Else
+                        txtStatus.Text = "Veto str err; retrying"
+                    End If
+                End If
+            End If
+            Sleep 500
+        Next
+    End If
+        
+    lRet = CM_Request_Device_Eject(DMSet(idx).dvi, lpVeto, szVeto, MAX_PATH, 0)
+    If (lRet = CR_SUCCESS) And (lpVeto = PNP_VetoTypeUnknown) Then
+        txtStatus.Text = "Device ejected."
+        Exit Sub
+    Else
+        If lpVeto Then
+            If InStr(szVeto, vbNullChar) > 1 Then
+                szVeto = Left$(szVeto, InStr(szVeto, vbNullChar) - 1)
+                txtStatus.Text = szVeto
+            Else
+                txtStatus.Text = "Veto (str err)."
+            End If
+        End If
+    End If
+End Sub
+
+Private Sub OnScanForChanges() Handles mnuScanChances.Click
+    'KB259697
+    Dim devInst As Long
+    Dim status As CONFIGRET
+    
+    'Get the root devnode
+    status = CM_Locate_DevNode(devInst, vbNullString, CM_LOCATE_DEVNODE_NORMAL)
+    
+    If status <> CR_SUCCESS Then
+        Debug.Print "Failed to locate root devnode, 0x" & Hex$(status)
+        Exit Sub
+    End If
+    
+    status = CM_Reenumerate_DevNode(devInst, 0)
+    
+    If status <> CR_SUCCESS Then
+        txtStatus.Text = "Failed to scan for changes, 0x" & Hex$(status)
+    Else
+        txtStatus.Text = "Scan for changes complete."
+    End If
+    
+    OnRefresh()
+End Sub
+
+
+Private Function IsProcessElevated() As Boolean
+    Dim hToken As LongPtr
+
+    If OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, hToken) = 0 Then Exit Function
+        
+    Dim tElv As TOKEN_ELEVATION
+    Dim dwSize As Long
+    If GetTokenInformation(hToken, TokenElevation, tElv, LenB(tElv), dwSize) = 0 Then
+        Debug.Print "Error getting token information."
+    End If
+
+    If tElv.TokenIsElevated Then IsProcessElevated = True
+
+    If hToken Then CloseHandle hToken
+End Function
+
+
+Private Sub TreeView1_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal x As OLE_XPOS_PIXELS, ByVal y As OLE_YPOS_PIXELS) Handles TreeView1.MouseDown
+	If Button = MK_RBUTTON Then
+        Debug.Print "NodeMouseDown " & x & "," & y
+        Dim pItem As Node
+        ' Set pItem = TreeView1.HitTest(CSng(x), CSng(y))
+        Dim tvhti As TVHITTESTINFO
+        Dim pt As POINT
+        GetCursorPos pt
+        Dim ptc As POINT
+        ScreenToClient TreeView1.hWnd, pt
+        tvhti.PT.x = pt.x 'x / Screen.TwipsPerPixelX
+        tvhti.PT.y = pt.y 'y / Screen.TwipsPerPixelY
+        SendMessage TreeView1.hWnd, TVM_HITTEST, 0, tvhti
+        If (tvhti.Flags And TVHT_ONITEM) Then
+            Set pItem = pvNodeFromHandle(tvhti.hItem)
+            Set TreeView1.SelectedItem = pItem '**BUG WORKAROUND**
+        End If
+        If pItem IsNot Nothing Then
+            Debug.Print "NodeMouseDown " & pItem.Text
+            Dim selIdx As Long = pvItemIndexFromHITEM(pItem.Handle)
+            If DMSet(selIdx).bDevice = False Then Exit Sub
+            idxSelected = selIdx
+            PopUpMenu(mnuDevice, , , , mnuProps)
+        End If
+    End If
+End Sub
+
+Private Sub mnuDevFolder_Click() Handles mnuDevFolder.Click
+    ShellExecute Me.hWnd, "open", "shell:::{A8A91A66-3A7D-4424-8D24-04E180695C7A}", vbNullString, vbNullString, SW_SHOWNORMAL
+End Sub
+
+Private Sub OnLinkClick() Handles mnuLink.Click
+    ShellExecute Me.hWnd, "open", "https://github.com/fafalone/DeviceExplorer", "", "", SW_SHOWNORMAL
+End Sub
+
+Private Sub OnAbout() Handles mnuAbout.Click
+    Dim tdc As TASKDIALOGCONFIG
+    tdc.cbSize = LenB(Of TASKDIALOGCONFIG)
+    tdc.hInstance = hModule
+    tdc.hWndParent = Me.hWnd
+    tdc.dwCommonButtons = TDCBF_CLOSE_BUTTON
+    tdc.dwFlags = TDF_ENABLE_HYPERLINKS
+    tdc.pfCallback = AddressOf TaskDialogCallbackProc
+    tdc.pszMainIcon = MAKEINTRESOURCE(CLng(TD_SHIELD_GRAY_ICON))
+    tdc.pszFooterIcon = MAKEINTRESOURCE(CLng(TD_INFORMATION_ICON))
+    tdc.pszWindowTitle = StrPtr(szHelpTitle)
+    tdc.pszMainInstruction = StrPtr(szHelpHeader)
+    tdc.pszContent = StrPtr(szHelpMessage)
+    tdc.pszFooter = StrPtr(szHelpFooter)
+        
+    Dim lRes As Long = TaskDialogIndirect(tdc)
+End Sub
+Public Function TaskDialogCallbackProc(ByVal hwnd As LongPtr, ByVal uNotification As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr, ByVal lpRefData As LongPtr) As LongPtr
+    Select Case uNotification
+        'Replace the shield icon with our app icon
+        Case TDN_DIALOG_CONSTRUCTED
+            SendMessageW hwnd, TDM_UPDATE_ICON, TDIE_ICON_MAIN, ByVal StrPtr(szHelpIconRes)
+            
+        'lParam is a pointer to the URL, so just forward it to execute with default browser.
+        Case TDN_HYPERLINK_CLICKED
+            Call ShellExecuteW(0, 0, lParam, 0, 0, SW_SHOWNORMAL)
+    End Select
+End Function
+
+
+' Private Function InsertDevByIdx(n As Long, out_hPar As LongPtr) As LongPtr
+' 	Dim oParNode As Node
+'     Set oParNode = FindDeviceParentNode(DMSet(n).AsscGUID)
+'     If (oParNode IsNot Nothing) Then
+'     	Dim oNode As Node
+'         Set oNode = TreeView1.Nodes.Add(oParNode, tvwChild, n, DMSet(n).DispName, DMSet(n).nIcon)
+'         If oNode IsNot Nothing Then
+'             out_hPar = oParNode.Handle
+'             Return oNode.Handle
+'         End If
+'     End If
+' End Function
+
+' Private Function FindDeviceParentNode(tGUID As UUID) As Node
+' 	Dim i As Long
+'     For i = 0 To UBound(DMSet)
+'         If DMSet(i).bDevice = False Then
+'             If IsEqualGUID(DMSet(i).AsscGUID, tGUID) Then
+'                 Set FindDeviceParentNode = pvNodeFromHandle(DMSet(i).hItem)
+'             End If
+'         End If
+'     Next
+' End Function
+
+Private Function dbg_GUIDToString(tg As UUID, Optional bBrack As Boolean = True) As String
+'StringFromGUID2 never works, even "working" code from vbaccelerator AND MSDN
+dbg_GUIDToString = Right$("00000000" & Hex$(tg.Data1), 8) & "-" & Right$("0000" & Hex$(tg.Data2), 4) & "-" & Right$("0000" & Hex$(tg.Data3), 4) & _
+"-" & Right$("00" & Hex$(CLng(tg.Data4(0))), 2) & Right$("00" & Hex$(CLng(tg.Data4(1))), 2) & "-" & Right$("00" & Hex$(CLng(tg.Data4(2))), 2) & _
+Right$("00" & Hex$(CLng(tg.Data4(3))), 2) & Right$("00" & Hex$(CLng(tg.Data4(4))), 2) & Right$("00" & Hex$(CLng(tg.Data4(5))), 2) & _
+Right$("00" & Hex$(CLng(tg.Data4(6))), 2) & Right$("00" & Hex$(CLng(tg.Data4(7))), 2)
+If bBrack Then dbg_GUIDToString = "{" & dbg_GUIDToString & "}"
+End Function
+Private Sub dbg_stringbytes(s As String, Optional bOut As Boolean = False)
+Dim i As Long
+Dim z As String
+For i = 1 To Len(s)
+    z = z & Format$(Hex$(AscW(Mid(s, i, 1))), "00") & " "
+Next i
+'If bOut Then
+    Debug.Print "StringBytes(" & s & ")"
+    Debug.Print z
+'Else
+'    Debug.Print "StringBytes(" & s & ")"
+'    Debug.Print z
+'End If
+End Sub
+
+
+
+
+End Class
