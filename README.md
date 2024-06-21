@@ -7,6 +7,8 @@
 
 ---
 
+**Update (21 Jun 2024):** The source has been updated to compile with the latest tB version, since breaking changes were introduced in recent builds. Source requires tB 563 or newer to build now. No feature updates. No binary updates.
+
 This project started out as just a proof of concept to list devices and test out some disable/enable code I wanted to try, but I got interested enough to turn it into a full blown application with all of the basic functionality of the system Device Manager. This project was started quite a while back, but I got stuck on a couple things, and with so many other interesting projects in the pipeline, shelved it for a while. But when I came across a solution to one of the problems (showing the device properties popup) recently, I got the motivation to finish it up. You can enable/disable devices, remove them, completely uninstall them, update their drivers, or eject them. To be honest, I'm not clear on the difference or true meaning behind some of these things, as neither Device Manager itself nor the APIs provide particularly good documentation of the details of each option, at least on the surface, I'll dig a little more in the future. 
 
 There's an unusual, for now, reason to do this project in twinBASIC: The enable/disable/remove APIs (at a minimum) do not allow 32bit applications to call them on 64bit Windows-- the `SetupDiCallClassInstaller` API will fail with `ERROR_IN_WOW64`, as [documented on MSDN](https://learn.microsoft.com/en-us/windows/win32/api/setupapi/nf-setupapi-setupdicallclassinstaller). Additionally, there's a 'Resources' tab in the properties:
