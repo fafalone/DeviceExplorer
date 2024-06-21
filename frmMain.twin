@@ -1,11 +1,16 @@
-[ Description ("tbDevMan Main Form") ]
-[ FormDesignerId ("9D5C3949-7539-4FCC-9D96-136E21889D63") ]
-[ PredeclaredId ]
+[Description("Device Explorer Main Form")]
+[FormDesignerId("9D5C3949-7539-4FCC-9D96-136E21889D63")]
+[PredeclaredId]
 Class Form1
+'Device Explorer v1.0 R3
+'(c) 2023-2024 Jon Johnson
+
+'v1.0 R3 - Source update for newer versions of tB. tB 563 or higher required.
 
 'Note: All APIs come from WinDevLib.
 
 'Code is currently highly repetive and inefficient, will refine after everything works.
+
 
 Private hModule As LongPtr 'We'll point this at the compiled exe if we're running in the IDE and it exists.
 
@@ -156,7 +161,7 @@ Private Sub OnExit() Handles mnuExit.Click
     Unload Me
 End Sub
 
-[ Description ("Loads button icons from the resource file (which is was a compiled exe must exist to take them from when running in the IDE). ") ]
+[Description("Loads button icons from the resource file (which is was a compiled exe must exist to take them from when running in the IDE). ")]
 Private Sub InitButtonIcons()
     Select Case m_ScaleX
         Case Is <= 1: cxyIconBtn = 24
@@ -187,7 +192,7 @@ Private Sub InitButtonIcons()
     DestroyIcon hBtn: hBtn = 0
 End Sub
 
-[ Description ("Assigns an HICON image to a CommandButton control with the given size and margins.") ]
+[Description("Assigns an HICON image to a CommandButton control with the given size and margins.")]
 Private Sub ButtonIconAssign(hWnd As LongPtr, hIcon As LongPtr, cx As Long, CY As Long, margLeft As Long, margRight As Long, margTop As Long, margBottom As Long)
 
 On Error GoTo e0
@@ -216,7 +221,7 @@ Private Sub OnUnload(Cancel As Integer) Handles Form.Unload
     If hModule <> App.hInstance Then FreeLibrary hModule
 End Sub
 
-[ Description ("Enumerates all hardware classes and adds them to the DMSet array and as root nodes in the TreeView.") ]
+[Description("Enumerates all hardware classes and adds them to the DMSet array and as root nodes in the TreeView.")]
 Private Sub pvEnumClasses()
     On Error GoTo e0
     Dim ret As BOOL
@@ -265,10 +270,16 @@ Private Sub pvEnumClasses()
     If nItems Then
         Dim oNode As Node
         For i = 0 To UBound(DMSet)
-        	Set oNode = TreeView1.Nodes.Add(, , , DMSet(i).Desc, DMSet(i).nIcon)
+        	Set oNode = TreeView1.Nodes.Add(, , , DMSet(i).Desc)
             DMSet(i).hItem = oNode.Handle
             oNode.Key = CVar(CStr(i))
             oNode.Sorted = True
+            Dim tvi As TVITEMW
+            tvi.Mask = TVIF_HANDLE Or TVIF_IMAGE Or TVIF_SELECTEDIMAGE
+            tvi.hItem = oNode.Handle
+            tvi.iImage = DMSet(i).nIcon
+            tvi.iSelectedImage = DMSet(i).nIcon
+            SendMessage TreeView1.hWnd, TVM_SETITEMW, 0, tvi
         Next
     End If
         
@@ -278,7 +289,7 @@ Debug.Print CurrentComponentName & "." & CurrentProcedureName & "->Error: " & Er
             
 End Sub
 
-[ Description ("Goes through the class list from pvEnumClasses and adds all installed devices for each category. Then, looks for devices with no associated class (which includes the 'Unknown' class), and adds them as 'Other devices'.") ]
+[Description("Goes through the class list from pvEnumClasses and adds all installed devices for each category. Then, looks for devices with no associated class (which includes the 'Unknown' class), and adds them as 'Other devices'.")]
 Private Sub pvPopulateDevices()
     On Error GoTo e0
     
@@ -395,9 +406,15 @@ Private Sub pvPopulateDevices()
                 Dim oNodePar As Node
                 Set oNodePar = pvNodeFromHandle(DMSet(i).hItem)
                 Dim oNode As Node
-                Set oNode = TreeView1.Nodes.Add(oNodePar, tvwChild, CVar(CStr(nItems)), DMSet(nItems).DispName, DMSet(nItems).nIcon)
+                Set oNode = TreeView1.Nodes.Add(oNodePar, tvwChild, CVar(CStr(nItems)), DMSet(nItems).DispName)
                 .hItem = oNode.Handle
                 .hItemPar = oNodePar.Handle
+                Dim tvi As TVITEMW
+                tvi.Mask = TVIF_HANDLE Or TVIF_IMAGE Or TVIF_SELECTEDIMAGE
+                tvi.hItem = oNode.Handle
+                tvi.iImage = DMSet(nItems).nIcon
+                tvi.iSelectedImage = DMSet(nItems).nIcon
+                SendMessage TreeView1.hWnd, TVM_SETITEMW, 0, tvi
                 
                 If bProblem Then
                 	.ProblemCode = nProbCode
@@ -516,11 +533,16 @@ Private Sub pvPopulateDevices()
                             DestroyIcon hIcon
                         End If
                        
-                        Set oNodeOther = TreeView1.Nodes.Add(, , , DMSet(nItems).Desc, DMSet(nItems).nIcon)
+                        Set oNodeOther = TreeView1.Nodes.Add(, , , DMSet(nItems).Desc)
                         DMSet(nItems).hItem = oNodeOther.Handle
                         oNodeOther.Key = CVar(CStr(nItems))
                         oNodeOther.Sorted = True
-                        
+                        Dim tvi2 As TVITEMW
+                        tvi2.Mask = TVIF_HANDLE Or TVIF_IMAGE Or TVIF_SELECTEDIMAGE
+                        tvi2.hItem = oNodeOther.Handle
+                        tvi2.iImage = DMSet(nItems).nIcon
+                        tvi2.iSelectedImage = DMSet(nItems).nIcon
+                        SendMessage TreeView1.hWnd, TVM_SETITEMW, 0, tvi2
                         nItems += 1
                      End If
                 
@@ -549,9 +571,15 @@ Private Sub pvPopulateDevices()
                             hIcon = 0
                         End If
 
-                        Set oNode = TreeView1.Nodes.Add(oNodeOther, tvwChild, CVar(CStr(nItems)), DMSet(nItems).DispName, DMSet(nItems).nIcon)
+                        Set oNode = TreeView1.Nodes.Add(oNodeOther, tvwChild, CVar(CStr(nItems)), DMSet(nItems).DispName)
                         .hItem = oNode.Handle
                         .hItemPar = oNodeOther.Handle
+                        Dim tvi3 As TVITEMW
+                        tvi3.Mask = TVIF_HANDLE Or TVIF_IMAGE Or TVIF_SELECTEDIMAGE
+                        tvi3.hItem = oNode.Handle
+                        tvi3.iImage = DMSet(nItems).nIcon
+                        tvi3.iSelectedImage = DMSet(nItems).nIcon
+                        SendMessage TreeView1.hWnd, TVM_SETITEMW, 0, tvi3
                         If bProblem Then
                             .ProblemCode = nProbCode
                             .ProblemText = sBufP
@@ -592,12 +620,12 @@ If hSet Then SetupDiDestroyDeviceInfoList hSet
 If hSetUnk Then SetupDiDestroyDeviceInfoList hSetUnk
 End Sub
 
-[ Description ("Sets overlay icons for the device tree: 0 = None, 1 = Problem (warning icon), 2 = Info icon, 3 = Disabled by user icon. ") ]
+[Description("Sets overlay icons for the device tree: 0 = None, 1 = Problem (warning icon), 2 = Info icon, 3 = Disabled by user icon. ")]
 Private Sub SetItemOverlayIndex(ByVal hItem As LongPtr, ByVal nIndex As Long)
     TreeView_SetItemState TreeView1.hWnd, hItem, INDEXTOOVERLAYMASK(nIndex), TVIS_OVERLAYMASK
 End Sub
 
-[ Description ("Shows the standard properties window for a given device.") ]
+[Description("Shows the standard properties window for a given device.")]
 Private Sub pvShowPropPage(idx As Long)
 On Error GoTo e0
 Dim hSet As LongPtr
@@ -649,7 +677,7 @@ Debug.Print CurrentComponentName & "." & CurrentProcedureName & "->Error: " & Er
 If hSet Then SetupDiDestroyDeviceInfoList hSet
 End Sub
 
-[ Description ("Retrieves a device set handle (hSet) and SP_DEVINFO_DATA type (pInfo) given a device index (idx). " & vbCrLf & "Important: It is the callers responsibility to free the device info list when True is returned.") ]
+[Description("Retrieves a device set handle (hSet) and SP_DEVINFO_DATA type (pInfo) given a device index (idx). " & vbCrLf & "Important: It is the callers responsibility to free the device info list when True is returned.")]
 Private Function DevInfoDataFromIndex(ByVal idx As Long, /* out */ hSet As LongPtr, /* out */ pInfo As SP_DEVINFO_DATA) As Boolean
     On Error GoTo e0
     Dim i As Long, j As Long
@@ -820,7 +848,7 @@ Debug.Print CurrentComponentName & "." & CurrentProcedureName & "->Error: " & Er
 If hSet Then SetupDiDestroyDeviceInfoList hSet
 End Function
 
-[ Description ("Returns a Node object given an HTREEITEM handle.") ]
+[Description("Returns a Node object given an HTREEITEM handle.")]
 Private Function pvNodeFromHandle(hItem As LongPtr) As Node
 	Dim oNode As Node
     For Each oNode In TreeView1.Nodes
@@ -830,7 +858,7 @@ Private Function pvNodeFromHandle(hItem As LongPtr) As Node
 	Next
 End Function
 
-[ Description ("Returns the DMSet items for the TreeView node represented by it's handle (HITEM)") ]
+[Description("Returns the DMSet items for the TreeView node represented by it's handle (HITEM)")]
 Private Function pvItemIndexFromHITEM(ByVal hItem As LongPtr) As Long
 	Dim i As Long
     For i = 0 To UBound(DMSet)
@@ -839,7 +867,7 @@ Private Function pvItemIndexFromHITEM(ByVal hItem As LongPtr) As Long
     Return -1
 End Function
 
-[ Description ("Prunes unused device categories from the tree.") ]
+[Description("Prunes unused device categories from the tree.")]
 Private Function pvPruneUnused() As Boolean
 	Dim pNode As Node
     For Each pNode In TreeView1.Nodes
@@ -1143,7 +1171,7 @@ Private Function IsProcessElevated() As Boolean
 End Function
 
 
-Private Sub TreeView1_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal x As OLE_XPOS_PIXELS, ByVal y As OLE_YPOS_PIXELS) Handles TreeView1.MouseDown
+Private Sub TreeView1_MouseDown(Button As Integer, Shift As Integer, x As Single, y As Single) Handles TreeView1.MouseDown
 	If Button = MK_RBUTTON Then
         Debug.Print "NodeMouseDown " & x & "," & y
         Dim pItem As Node
