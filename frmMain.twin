@@ -1,16 +1,24 @@
-[Description("Device Explorer Main Form")]
+[Description("DevExplorer Main Form")]
 [FormDesignerId("9D5C3949-7539-4FCC-9D96-136E21889D63")]
 [PredeclaredId]
 Class Form1
-'Device Explorer v1.0 R3
+'Device Explorer v1.2
 '(c) 2023-2024 Jon Johnson
-
-'v1.0 R3 - Source update for newer versions of tB. tB 563 or higher required.
+'v1.2
+'  - Weird issue with icons being off by one... I commented out lines that adjusted these; but in 
+'    previous versions they were required to get the correct icon. Still is, for Other Devices.
+'    Please let me know if you see the wrong icon on any category or device!
+'
+'  - Fix for icons disappearing when an item was selected.
+'
+'  - Fix for problem running in IDE multiple times without compiler restart.
+'
+'
+'v1.1 - Update for newer versions of tB.
 
 'Note: All APIs come from WinDevLib.
 
 'Code is currently highly repetive and inefficient, will refine after everything works.
-
 
 Private hModule As LongPtr 'We'll point this at the compiled exe if we're running in the IDE and it exists.
 
@@ -43,7 +51,7 @@ Private nDevices As Long
 Private arClasses() As UUID
 
 Private Const szHelpTitle = "Device Explorer"
-Private Const szHelpHeader = "Device Explorer"
+Private Const szHelpHeader = "Device Explorer v1.2"
 Private Const szHelpMessage = "This project is a basic, light weight, and portable device manager for the local computer: list devices, show their property pages, and enable, disable, " & _
                               "remove, or eject them. Note that not all devices support all actions, and running as administrator is required in most cases." & vbcrLf & _
                               "Project by Jon Johnson based on numerous C/C++ projects, and an " & _
@@ -51,7 +59,7 @@ Private Const szHelpMessage = "This project is a basic, light weight, and portab
                               " on VBForums.com by Elroy. " & vbcrlf & vbcrlf & _
                               "For the readme, filing bug reports, original source, feature requests, and anything else, visit the project's GitHub repository:" & vbcrlf & _
                               "<a href=""https://github.com/fafalone/DeviceExplorer"">https://github.com/fafalone/DeviceExplorer</a>"
-Private Const szHelpFooter = "Copyright ©2023 Jon Johnson. Licensed under the MIT license. See code or repository for more information."
+Private Const szHelpFooter = "Copyright ©2023-2024 Jon Johnson. Licensed under the MIT license. See code or repository for more information."
 Private Const szHelpIconRes = "101"
 Private idxSelected As Long
 
@@ -71,6 +79,10 @@ Private Const IDI_PLAIN = "307"
 
 
 Private Sub OnInitialize() Handles Form.Initialize
+    ReDim arClasses(0)
+    ReDim DMSet(0)
+    nItems = 0
+    nDevices = 0
     'Attempt to load resources from last .exe
    hModule = GetModuleHandleW()
    Dim InIde As Boolean: Debug.Assert MakeTrue(InIde)
@@ -89,12 +101,11 @@ Private Function MakeTrue(ByRef x As Boolean) As Boolean
 End Function
 
 Private Sub OnLoad() Handles Form.Load
-    Dim hDC As LongPtr
-    hDC = GetDC(0&)
+    Dim hDC As LongPtr = GetDC(0&)
     m_ScaleX = GetDeviceCaps(hDC, LOGPIXELSX) / 96
     m_ScaleY = GetDeviceCaps(hDC, LOGPIXELSY) / 96
     Select Case m_ScaleX
-    	Case Is <= 1: cxyIcon = 24
+        Case Is <= 1: cxyIcon = 24
         Case Is <= 1.25: cxyIcon = 32
         Case Is <= 1.5: cxyIcon = 48
         Case Else: cxyIcon = 64
@@ -150,7 +161,7 @@ Private Sub OnLoad() Handles Form.Load
     SendMessage TreeView1.hWnd, TVM_SETIMAGELIST, 0, ByVal himlMain
     SetWindowTheme TreeView1.hWnd, StrPtr("explorer"), 0
     InitButtonIcons
-    Dim x As Long = REG_DWORD
+
     pvEnumClasses
     pvPopulateDevices
     pvPruneUnused()
@@ -170,31 +181,32 @@ Private Sub InitButtonIcons()
         Case Else: cxyIconBtn = 64
     End Select
     Dim hBtn As LongPtr = LoadImage(hModule, ByVal StrPtr(IDI_REFRESH), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
-    If hBtn Then ButtonIconAssign cmdEnum.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    If hBtn Then ButtonIconAssign cmdEnum.hWnd, hBtn, cxyIconBtn, cxyIconBtn, BUTTON_IMAGELIST_ALIGN_RIGHT, 0&, 2&, 2&, 0&
     DestroyIcon hBtn: hBtn = 0
     hBtn = LoadImage(hModule, ByVal StrPtr(IDI_DISABLE), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
-    If hBtn Then ButtonIconAssign cmdDisable.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    If hBtn Then ButtonIconAssign cmdDisable.hWnd, hBtn, cxyIconBtn, cxyIconBtn, BUTTON_IMAGELIST_ALIGN_RIGHT, 0&, 2&, 2&, 0&
     DestroyIcon hBtn: hBtn = 0
     hBtn = LoadImage(hModule, ByVal StrPtr(IDI_EJECT), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
-    If hBtn Then ButtonIconAssign cmdEject.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    If hBtn Then ButtonIconAssign cmdEject.hWnd, hBtn, cxyIconBtn, cxyIconBtn, BUTTON_IMAGELIST_ALIGN_RIGHT, 0&, 2&, 2&, 0&
     DestroyIcon hBtn: hBtn = 0
     hBtn = LoadImage(hModule, ByVal StrPtr(IDI_UNINST), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
-    If hBtn Then ButtonIconAssign cmdUninstall.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    If hBtn Then ButtonIconAssign cmdUninstall.hWnd, hBtn, cxyIconBtn, cxyIconBtn, BUTTON_IMAGELIST_ALIGN_RIGHT, 0&, 2&, 2&, 0&
     DestroyIcon hBtn: hBtn = 0
     hBtn = LoadImage(hModule, ByVal StrPtr(IDI_UPDATE), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
-    If hBtn Then ButtonIconAssign cmdUpdate.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    If hBtn Then ButtonIconAssign cmdUpdate.hWnd, hBtn, cxyIconBtn, cxyIconBtn, BUTTON_IMAGELIST_ALIGN_RIGHT, 0&, 2&, 2&, 0&
     DestroyIcon hBtn: hBtn = 0
     hBtn = LoadImage(hModule, ByVal StrPtr(IDI_REMOVE), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
-    If hBtn Then ButtonIconAssign cmdRem.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    If hBtn Then ButtonIconAssign cmdRem.hWnd, hBtn, cxyIconBtn, cxyIconBtn, BUTTON_IMAGELIST_ALIGN_RIGHT, 0&, 2&, 2&, 0&
     DestroyIcon hBtn: hBtn = 0
     hBtn = LoadImage(hModule, ByVal StrPtr(IDI_PLAIN), IMAGE_ICON, cxyIconBtn, cxyIconBtn, LR_DEFAULTCOLOR Or LR_SHARED)
-    If hBtn Then ButtonIconAssign cmdEnable.hWnd, hBtn, cxyIconBtn, cxyIconBtn, 0&, 2&, 2&, 0&
+    If hBtn Then ButtonIconAssign cmdEnable.hWnd, hBtn, cxyIconBtn, cxyIconBtn, BUTTON_IMAGELIST_ALIGN_RIGHT, 0&, 2&, 2&, 0&
     DestroyIcon hBtn: hBtn = 0
 End Sub
 
 [Description("Assigns an HICON image to a CommandButton control with the given size and margins.")]
-Private Sub ButtonIconAssign(hWnd As LongPtr, hIcon As LongPtr, cx As Long, CY As Long, margLeft As Long, margRight As Long, margTop As Long, margBottom As Long)
-
+Private Sub ButtonIconAssign(hWnd As LongPtr, hIcon As LongPtr, cx As Long, CY As Long, align As BUTTON_IMAGELIST_ALIGN, margLeft As Long, margRight As Long, margTop As Long, margBottom As Long)
+'BM_SETIMAGE doesn't allow specifying margins. So you need to put a space before the text or it's way too close to the image; but then one space
+'might be too much or too little. If we use this method instead, the margins will be perfectly set by pixel.
 On Error GoTo e0
 Dim bi4 As BUTTON_IMAGELIST
 bi4.himl = ImageList_Create(cx, CY, ILC_COLOR32 Or ILC_MASK, 1, 1)
@@ -223,7 +235,7 @@ End Sub
 
 [Description("Enumerates all hardware classes and adds them to the DMSet array and as root nodes in the TreeView.")]
 Private Sub pvEnumClasses()
-    On Error GoTo e0
+    'On Error GoTo e0
     Dim ret As BOOL
     Dim cbReq As Long
     Dim i As Long
@@ -257,7 +269,7 @@ Private Sub pvEnumClasses()
                 DMSet(i).AsscGUID = arClasses(i)
                 If hIcon Then
                     DMSet(i).nIcon = ImageList_AddIcon(himlMain, hIcon)
-                    DMSet(i).nIcon += 1
+                    ' DMSet(i).nIcon += 1
                     DestroyIcon hIcon
                 End If
                 nItems += 1
@@ -398,7 +410,7 @@ Private Sub pvPopulateDevices()
                 .InstId = sBufID
                 If hIcon Then
                     .nIcon = ImageList_AddIcon(himlMain, hIcon)
-                    .nIcon += 1
+                    ' .nIcon += 1
                     DestroyIcon hIcon
                     hIcon = 0
                 End If
@@ -529,7 +541,7 @@ Private Sub pvPopulateDevices()
                         hIcon = LoadImage(hModule, ByVal StrPtr(IDI_ICONUNK), IMAGE_ICON, cxyIcon, cxyIcon, LR_DEFAULTCOLOR Or LR_SHARED)
                         If hIcon Then
                             DMSet(nItems).nIcon = ImageList_AddIcon(himlMain, hIcon)
-                            DMSet(nItems).nIcon += 1
+                            ' DMSet(nItems).nIcon += 1
                             DestroyIcon hIcon
                         End If
                        
@@ -566,7 +578,7 @@ Private Sub pvPopulateDevices()
                         End If
                         If hIcon Then
                             .nIcon = ImageList_AddIcon(himlMain, hIcon)
-                            .nIcon += 1
+                            ' .nIcon += 1
                             DestroyIcon hIcon
                             hIcon = 0
                         End If
@@ -1282,7 +1294,7 @@ Next i
 '    Debug.Print z
 'End If
 End Sub
-
+ 
 
 
 
