@@ -1,5 +1,5 @@
 # DevExplorer
-## Device Explorer
+## Device Explorer v1.2
 
 **A basic implementation of a device manager like the system's in twinBASIC.**
 
@@ -7,7 +7,16 @@
 
 ---
 
-**Update (21 Jun 2024):** The source has been updated to compile with the latest tB version, since breaking changes were introduced in recent builds. Source requires tB 563 or newer to build now. No feature updates. No binary updates.
+**Update (04 Sep 2024):** 
+'v1.2
+-Weird issue with icons being off by one... I commented out lines that adjusted these; but in previous versions they were required to get the correct icon. Still is, for Other Devices.
+  Please let me know if you see the wrong icon on any category or device!
+ 
+-Fix for icons disappearing when an item was selected.
+'
+-Fix for problem running in IDE multiple times without compiler restart.
+
+**Update (21 Jun 2024):** v1.1 The source has been updated to compile with the latest tB version, since breaking changes were introduced in recent builds. Source requires tB 563 or newer to build now. No feature updates. No binary updates.
 
 This project started out as just a proof of concept to list devices and test out some disable/enable code I wanted to try, but I got interested enough to turn it into a full blown application with all of the basic functionality of the system Device Manager. This project was started quite a while back, but I got stuck on a couple things, and with so many other interesting projects in the pipeline, shelved it for a while. But when I came across a solution to one of the problems (showing the device properties popup) recently, I got the motivation to finish it up. You can enable/disable devices, remove them, completely uninstall them, update their drivers, or eject them. To be honest, I'm not clear on the difference or true meaning behind some of these things, as neither Device Manager itself nor the APIs provide particularly good documentation of the details of each option, at least on the surface, I'll dig a little more in the future. 
 
