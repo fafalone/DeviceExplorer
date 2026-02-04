@@ -1,5 +1,5 @@
 # DevExplorer
-## Device Explorer v1.2
+## Device Explorer v1.3
 
 **A basic implementation of a device manager like the system's in twinBASIC.**
 
@@ -7,14 +7,22 @@
 
 ---
 
+**Update (04 Feb 2026):**
+'v1.3
+- Code fixes for new twinBASIC syntax rules; update WDL package and change to linked.
+- Fix Computer picture black background bug
+- Existing binary build had broken right click
+- Add refreshes for device removals
+
+
 **Update (04 Sep 2024):** 
 'v1.2
--Weird issue with icons being off by one... I commented out lines that adjusted these; but in previous versions they were required to get the correct icon. Still is, for Other Devices.
+- Weird issue with icons being off by one... I commented out lines that adjusted these; but in previous versions they were required to get the correct icon. Still is, for Other Devices.
   Please let me know if you see the wrong icon on any category or device!
  
--Fix for icons disappearing when an item was selected.
+- Fix for icons disappearing when an item was selected.
 '
--Fix for problem running in IDE multiple times without compiler restart.
+- Fix for problem running in IDE multiple times without compiler restart.
 
 **Update (21 Jun 2024):** v1.1 The source has been updated to compile with the latest tB version, since breaking changes were introduced in recent builds. Source requires tB 563 or newer to build now. No feature updates. No binary updates.
 
