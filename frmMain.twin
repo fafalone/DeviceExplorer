@@ -2,8 +2,12 @@
 [FormDesignerId("9D5C3949-7539-4FCC-9D96-136E21889D63")]
 [PredeclaredId]
 Class Form1
-'Device Explorer v1.2
-'(c) 2023-2024 Jon Johnson
+'Device Explorer v1.3
+'(c) 2023-2026 Jon Johnson
+'v1.3
+'- Fixes for new twinBASIC syntax rules
+'- Fix Computer picture black background bug
+'- Existing binary build had broken right click
 'v1.2
 '  - Weird issue with icons being off by one... I commented out lines that adjusted these; but in 
 '    previous versions they were required to get the correct icon. Still is, for Other Devices.
@@ -235,7 +239,7 @@ End Sub
 
 [Description("Enumerates all hardware classes and adds them to the DMSet array and as root nodes in the TreeView.")]
 Private Sub pvEnumClasses()
-    'On Error GoTo e0
+    On Error GoTo e0
     Dim ret As BOOL
     Dim cbReq As Long
     Dim i As Long
@@ -243,7 +247,7 @@ Private Sub pvEnumClasses()
     Dim cchReq As Long
     Dim hIcon As LongPtr
     
-    ret = SetupDiBuildClassInfoList(0, vbNullPtr, 0, cbReq)
+    ret = SetupDiBuildClassInfoList(0, ByVal vbNullPtr, 0, cbReq)
     
     If cbReq > 0 Then
         ReDim arClasses(cbReq - 1)
@@ -454,7 +458,7 @@ Private Sub pvPopulateDevices()
     Debug.Print "Completed primary device enum, loading Other Devices"
     'Enumerate 'Other devices' -- those without a setup class
     
-    Dim hSetUnk As LongPtr = SetupDiGetClassDevsW(vbNullPtr, 0, 0, IIf(Check3.Value = vbChecked, DIGCF_ALLCLASSES, DIGCF_ALLCLASSES Or DIGCF_PRESENT))
+    Dim hSetUnk As LongPtr = SetupDiGetClassDevsW(ByVal vbNullPtr, 0, 0, IIf(Check3.Value = vbChecked, DIGCF_ALLCLASSES, DIGCF_ALLCLASSES Or DIGCF_PRESENT))
     If hSetUnk Then
     	Dim spdid As SP_DEVINFO_DATA
         Dim nPropType As DEVPROPTYPE
@@ -621,7 +625,7 @@ Private Sub pvPopulateDevices()
     SetupDiDestroyDeviceInfoList hSet
     
     txtStatus.Text = "Found " & CStr(nDevices) & " devices."
-    RedrawWindow txtStatus.hWnd, vbNullPtr, 0, RDW_ALLCHILDREN Or RDW_ERASENOW Or RDW_INVALIDATE
+    RedrawWindow txtStatus.hWnd, ByVal vbNullPtr, 0, RDW_ALLCHILDREN Or RDW_ERASENOW Or RDW_INVALIDATE
     UpdateWindow txtStatus.hWnd
     Debug.Print "StatusText=" & txtStatus.Text
     ' txtStatus.SyncToSource()
