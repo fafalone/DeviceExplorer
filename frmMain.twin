@@ -5,9 +5,10 @@ Class Form1
 'Device Explorer v1.3
 '(c) 2023-2026 Jon Johnson
 'v1.3
-'- Fixes for new twinBASIC syntax rules
+'- Code fixes for new twinBASIC syntax rules; update WDL package and change to linked.
 '- Fix Computer picture black background bug
 '- Existing binary build had broken right click
+'- Add refreshes for device removals
 'v1.2
 '  - Weird issue with icons being off by one... I commented out lines that adjusted these; but in 
 '    previous versions they were required to get the correct icon. Still is, for Other Devices.
@@ -55,7 +56,7 @@ Private nDevices As Long
 Private arClasses() As UUID
 
 Private Const szHelpTitle = "Device Explorer"
-Private Const szHelpHeader = "Device Explorer v1.2"
+Private Const szHelpHeader = "Device Explorer v1.3"
 Private Const szHelpMessage = "This project is a basic, light weight, and portable device manager for the local computer: list devices, show their property pages, and enable, disable, " & _
                               "remove, or eject them. Note that not all devices support all actions, and running as administrator is required in most cases." & vbcrLf & _
                               "Project by Jon Johnson based on numerous C/C++ projects, and an " & _
@@ -999,6 +1000,7 @@ Private Sub OnRemoveDevice() Handles cmdRem.Click, mnuRemove.Click
             txtStatus.Text = "An error occured removing device: " & ret & ", " & GetSystemErrorString(ret)
         End If
     End If
+    OnRefresh()
 End Sub
 
 Private Sub OnEjectDevice() Handles cmdEject.Click, mnuEject.Click
@@ -1013,6 +1015,7 @@ Private Sub OnEjectDevice() Handles cmdEject.Click, mnuEject.Click
         Exit Sub
     End If
     pvEjectDevice selIdx
+    OnRefresh()
 End Sub
 
 Private Sub OnUpdateDevice() Handles cmdUpdate.Click
@@ -1095,6 +1098,7 @@ Private Sub OnUninstall() Handles cmdUninstall.Click, mnuUninstall.Click
         	txtStatus.Text = "Error uninstalling device, " & Err.LastDllError & ": " & GetSystemErrorString(Err.LastDllError)
         End If
     End If
+    
 End Sub
 
 
